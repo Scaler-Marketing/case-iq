@@ -1,8 +1,8 @@
-/**
+ /**
  * Case IQ — Research gate modal (Marketo form 2761)
  *
  * Flow:
- * 1. Auto-open modal on load (clicks [trigger-modal="open"])
+ * 1. Open modal after user scrolls ~50% down the page (clicks [trigger-modal="open"])
  * 2. On successful Marketo submit → click [trigger-modal="close"], stop prompting
  * 3. If user closes without submitting → re-open once they scroll past SCROLL_THRESHOLD_PX
  *
@@ -14,7 +14,7 @@
   window.__caseIqResearchModalInitialized = true;
 
   const STORAGE_KEY = "caseiq_research_modal_submitted";
-  const FORM_NUMERIC_ID = "2761";
+  const FORM_NUMERIC_ID = "2417";
   const MKTO_FORM_ID = `mktoForm_${FORM_NUMERIC_ID}`;
   const MODAL_SELECTOR = ".popup-modal_research-component";
   const OPEN_SELECTOR =
@@ -23,13 +23,14 @@
   const CLOSE_SELECTOR = "[trigger-modal='close']";
   const SUCCESS_SELECTOR =
     ".wf_mkto_success, [data-wf-marketo-form-state='success']";
-  const AUTO_OPEN_DELAY_MS = 400;
+  const INITIAL_OPEN_SCROLL_FRACTION = 0.5;
   const SCROLL_THRESHOLD_PX = 80;
   const MARKETO_POLL_MS = 500;
   const MARKETO_POLL_TIMEOUT_MS = 30000;
 
   let formSubmitted = readSubmittedFlag();
   let closingAfterSuccess = false;
+  let awaitingInitialScrollOpen = !formSubmitted;
   let awaitingScrollReopen = false;
   let scrollBaselineY = 0;
   let marketoHooksAttached = false;
@@ -76,6 +77,32 @@
       document.body.scrollTop ||
       0
     );
+  }
+
+  function getMaxScrollY() {
+    const docHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.offsetHeight
+    );
+    const viewportHeight =
+      window.innerHeight ||
+      document.documentElement.clientHeight ||
+      document.body.clientHeight ||
+      0;
+
+    return Math.max(0, docHeight - viewportHeight);
+  }
+
+  function hasReachedInitialScrollDepth() {
+    const maxScroll = getMaxScrollY();
+
+    if (maxScroll < SCROLL_THRESHOLD_PX) {
+      return false;
+    }
+
+    return getScrollY() >= maxScroll * INITIAL_OPEN_SCROLL_FRACTION;
   }
 
   function isModalOpen() {
@@ -161,9 +188,10 @@
     formSubmitted = true;
     closingAfterSuccess = true;
     persistSubmittedFlag();
+    awaitingInitialScrollOpen = false;
     awaitingScrollReopen = false;
 
-    detachScrollReopenListener();
+    detachScrollActivityListener();
 
     window.setTimeout(() => {
       clickCloseTrigger();
@@ -180,11 +208,26 @@
 
     awaitingScrollReopen = true;
     scrollBaselineY = getScrollY();
-    attachScrollReopenListener();
+    attachScrollActivityListener();
 
     if (typeof console !== "undefined" && console.debug) {
       console.debug("[CaseIQ Research Modal] armed scroll reopen", {
         scrollBaselineY,
+      });
+    }
+  }
+
+  function tryInitialScrollOpen() {
+    if (formSubmitted || !awaitingInitialScrollOpen || isModalOpen()) return;
+    if (!hasReachedInitialScrollDepth()) return;
+
+    awaitingInitialScrollOpen = false;
+
+    if (clickOpenTrigger() && typeof console !== "undefined" && console.debug) {
+      console.debug("[CaseIQ Research Modal] opened after scroll depth", {
+        scrollY: getScrollY(),
+        maxScrollY: getMaxScrollY(),
+        fraction: INITIAL_OPEN_SCROLL_FRACTION,
       });
     }
   }
@@ -197,42 +240,42 @@
 
     if (clickOpenTrigger()) {
       awaitingScrollReopen = false;
-      detachScrollReopenListener();
     }
   }
 
-  function onScrollForReopen() {
+  function onScrollActivity() {
+    tryInitialScrollOpen();
     tryReopenAfterScroll();
   }
 
-  let scrollReopenAttached = false;
+  let scrollActivityAttached = false;
 
-  function attachScrollReopenListener() {
-    if (scrollReopenAttached || formSubmitted) return;
+  function attachScrollActivityListener() {
+    if (scrollActivityAttached || formSubmitted) return;
 
-    window.addEventListener("scroll", onScrollForReopen, {
+    window.addEventListener("scroll", onScrollActivity, {
       passive: true,
       capture: true,
     });
-    document.addEventListener("scroll", onScrollForReopen, {
+    document.addEventListener("scroll", onScrollActivity, {
       passive: true,
       capture: true,
     });
-    window.addEventListener("wheel", onScrollForReopen, { passive: true });
-    window.addEventListener("touchmove", onScrollForReopen, { passive: true });
+    window.addEventListener("wheel", onScrollActivity, { passive: true });
+    window.addEventListener("touchmove", onScrollActivity, { passive: true });
 
-    scrollReopenAttached = true;
+    scrollActivityAttached = true;
   }
 
-  function detachScrollReopenListener() {
-    if (!scrollReopenAttached) return;
+  function detachScrollActivityListener() {
+    if (!scrollActivityAttached) return;
 
-    window.removeEventListener("scroll", onScrollForReopen, { capture: true });
-    document.removeEventListener("scroll", onScrollForReopen, { capture: true });
-    window.removeEventListener("wheel", onScrollForReopen);
-    window.removeEventListener("touchmove", onScrollForReopen);
+    window.removeEventListener("scroll", onScrollActivity, { capture: true });
+    document.removeEventListener("scroll", onScrollActivity, { capture: true });
+    window.removeEventListener("wheel", onScrollActivity);
+    window.removeEventListener("touchmove", onScrollActivity);
 
-    scrollReopenAttached = false;
+    scrollActivityAttached = false;
   }
 
   function waitForModalClosed(callback, attempt = 0) {
@@ -377,13 +420,11 @@
     });
   }
 
-  function openModalOnLoad() {
-    if (formSubmitted) return;
+  function armInitialScrollOpen() {
+    if (formSubmitted || !awaitingInitialScrollOpen) return;
 
-    window.setTimeout(() => {
-      if (formSubmitted || isModalOpen()) return;
-      clickOpenTrigger();
-    }, AUTO_OPEN_DELAY_MS);
+    attachScrollActivityListener();
+    tryInitialScrollOpen();
   }
 
   function init() {
@@ -392,7 +433,7 @@
     document.addEventListener("click", handleDocumentClick, true);
     attachModalVisibilityObserver();
     pollForFormHooks(Date.now());
-    openModalOnLoad();
+    armInitialScrollOpen();
   }
 
   window.resetCaseIqResearchModalSubmitted = () => {
@@ -403,6 +444,7 @@
     }
 
     formSubmitted = false;
+    awaitingInitialScrollOpen = true;
     awaitingScrollReopen = false;
     closingAfterSuccess = false;
     marketoHooksAttached = false;
@@ -417,7 +459,7 @@
       modalVisibilityObserver = null;
     }
 
-    detachScrollReopenListener();
+    detachScrollActivityListener();
   };
 
   if (document.readyState === "loading") {
@@ -426,3 +468,4 @@
     init();
   }
 })();
+
