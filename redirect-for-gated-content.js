@@ -14,7 +14,7 @@
   if (window.__caseIqGatedResourceMarketoRedirectInitialized) return;
   window.__caseIqGatedResourceMarketoRedirectInitialized = true;
 
-  const FORM_NUMERIC_ID = "2761";
+  const FORM_NUMERIC_ID = "2417";
   const MKTO_FORM_ID = `mktoForm_${FORM_NUMERIC_ID}`;
   const REDIRECT_STORAGE_KEY = "caseiq_gated_resource_redirect_to";
   const PLACEHOLDER_SELECTOR = `[data-wf-marketo-form-id="${FORM_NUMERIC_ID}"]`;
