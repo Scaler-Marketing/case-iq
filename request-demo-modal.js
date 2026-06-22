@@ -4,7 +4,7 @@
 
   const COOKIE_NAME = "caseiq_modal_dismissed";
   const COOKIE_VALUE = "true";
-  const COOKIE_DAYS = 30;
+  const COOKIE_HOURS = 24;
   const AUTO_OPEN_DELAY_MS = 300;
   const OPEN_SELECTOR = '[trigger-modal="open"]';
   const CLOSE_SELECTOR = '[trigger-modal="close"]';
@@ -17,7 +17,7 @@
 
   function setDismissedModalCookie() {
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + COOKIE_DAYS);
+    expiresAt.setHours(expiresAt.getHours() + COOKIE_HOURS);
 
     document.cookie =
       `${COOKIE_NAME}=${COOKIE_VALUE}; ` +
