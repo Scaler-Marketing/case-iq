@@ -6,12 +6,11 @@
  *    - If the URL has UTMs, they OVERWRITE what's stored (last-touch attribution).
  *    - If the URL has none, the previously stored UTMs persist untouched.
  * 2. Stored values survive navigation, new tabs, and browser restarts (localStorage).
- * 3. Keeps the UTMs visible in the browser address bar on every page:
- *    - Back-fills the current URL from storage (history.replaceState), and
- *    - Appends the UTMs to internal links so the NEXT page loads with them too.
- * 4. Auto-fills matching hidden fields on any Marketo form on the page so the
+ *    Persistence is invisible — the page URL is never rewritten, so clean URLs
+ *    stay clean. UTMs only update when a URL actually carries new ?utm_ values.
+ * 3. Auto-fills matching hidden fields on any Marketo form on the page so the
  *    values are submitted with the lead.
- * 5. Clears the stored UTMs ONLY when a Marketo form is successfully submitted.
+ * 4. Clears the stored UTMs ONLY when a Marketo form is successfully submitted.
  *
  * Paste in Webflow: Site Settings → Custom Code → Footer (before </body>),
  * so it runs site-wide and persistence works across every page.
@@ -90,94 +89,6 @@
     return stored;
   }
 
-  // --- Keep UTMs in the address bar ---------------------------------------
-  // Back-fills the current URL from storage so the params show up in the bar
-  // even when the visitor arrived on this page without them (e.g. direct nav).
-  function syncAddressBar(values) {
-    if (!values || !Object.keys(values).length) return;
-    if (!window.history || typeof window.history.replaceState !== "function") {
-      return;
-    }
-
-    let url;
-    try {
-      url = new URL(window.location.href);
-    } catch {
-      return;
-    }
-
-    let changed = false;
-    Object.keys(values).forEach((key) => {
-      if (url.searchParams.get(key) !== values[key]) {
-        url.searchParams.set(key, values[key]);
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      try {
-        window.history.replaceState(window.history.state, "", url.toString());
-        log("Synced UTMs into address bar:", url.search);
-      } catch {
-        /* no-op */
-      }
-    }
-  }
-
-  // --- Carry UTMs forward on internal links -------------------------------
-  // Appends the stored UTMs to a same-origin link (without clobbering any UTMs
-  // the link already specifies on purpose).
-  function decorateLink(anchor, values) {
-    if (!anchor || !anchor.getAttribute) return;
-
-    const href = anchor.getAttribute("href");
-    if (!href || href.startsWith("#")) return;
-    if (/^(mailto:|tel:|javascript:|sms:)/i.test(href)) return;
-
-    let url;
-    try {
-      url = new URL(anchor.href, window.location.href);
-    } catch {
-      return;
-    }
-
-    if (url.origin !== window.location.origin) return; // internal links only
-    if (!/^https?:$/.test(url.protocol)) return;
-
-    let changed = false;
-    Object.keys(values).forEach((key) => {
-      if (!url.searchParams.has(key)) {
-        url.searchParams.set(key, values[key]);
-        changed = true;
-      }
-    });
-
-    if (changed) anchor.href = url.toString();
-  }
-
-  function decorateAllLinks(values) {
-    if (!values || !Object.keys(values).length) return;
-    document
-      .querySelectorAll("a[href]")
-      .forEach((anchor) => decorateLink(anchor, values));
-    log("Decorated internal links with UTMs.");
-  }
-
-  // Catches links added after load (dynamic nav, CMS lists, etc.) at click time.
-  function attachLinkClickFallback() {
-    document.addEventListener(
-      "click",
-      (event) => {
-        const anchor =
-          event.target && event.target.closest
-            ? event.target.closest("a[href]")
-            : null;
-        if (anchor) decorateLink(anchor, readStored());
-      },
-      true // capture phase — run before the browser follows the link
-    );
-  }
-
   // --- Fill Marketo hidden fields -----------------------------------------
   function fillMarketoForm(form, values) {
     if (!values || !Object.keys(values).length) return;
@@ -250,19 +161,10 @@
     current
   );
 
-  // Reflect stored UTMs in the address bar right away.
-  syncAddressBar(current);
-
-  function onReady() {
-    decorateAllLinks(readStored());
-    attachLinkClickFallback();
-    waitForMarketo();
-  }
-
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", onReady, { once: true });
+    document.addEventListener("DOMContentLoaded", waitForMarketo, { once: true });
   } else {
-    onReady();
+    waitForMarketo();
   }
 
   // Expose a couple of helpers for debugging / other scripts.
