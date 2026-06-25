@@ -1,65 +1,75 @@
 /**
- * Case IQ — Lightbox (Fancybox)
- * =============================
+ * Case IQ — Lightbox (Fancybox, lazy-loaded)
+ * ==========================================
  *
  * Opens a Fancybox image gallery when users click marked <img> elements in Webflow.
  * Images are grouped by `data-lightbox-group` so each group acts as its own slideshow.
  *
- * ---
- * Webflow setup
- * ---
- *
- * Head (Project Settings → Custom Code → Head):
- *   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui@6.1/dist/fancybox/fancybox.css" />
- *
- * Footer (Project Settings → Custom Code → Footer, before </body>):
- *   1. Fancybox JS CDN
- *   2. Cursor CSS (see lightbox.html)
- *   3. This script (inline or hosted)
- *
- *   <script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui@6.1/dist/fancybox/fancybox.umd.js"></script>
+ * PERFORMANCE: Fancybox itself (JS + CSS) is NOT loaded at page load. It is fetched
+ * on the FIRST click of a lightbox image and reused thereafter. Pages with no gallery
+ * (or where no one opens one) never download it.
  *
  * ---
- * Image attributes (Designer → Image → Custom Attributes)
+ * Webflow setup (IMPORTANT — changed from the old version)
  * ---
  *
+ * REMOVE these two eager tags from Webflow Custom Code — this script now loads them on demand:
+ *   ❌ Head:   <link rel="stylesheet" href=".../@fancyapps/ui@6.1/dist/fancybox/fancybox.css" />
+ *   ❌ Footer: <script src=".../@fancyapps/ui@6.1/dist/fancybox/fancybox.umd.js"></script>
+ *
+ * KEEP only this script (Footer, before </body>):
+ *   <script src="https://cdn.jsdelivr.net/gh/Scaler-Marketing/case-iq@<new-version>/fancybox.js"></script>
+ *
+ * ---
+ * Image attributes (Designer → Image → Custom Attributes) — UNCHANGED
+ * ---
  *   data-lightbox=""                Required. Marks the image as lightbox-eligible.
- *   data-lightbox-group="general"   Required. Non-empty group name. Images with the same
- *                                   group appear together in one gallery. If this attribute
- *                                   is missing or blank, the image is ignored entirely.
- *   data-lightbox-caption=""        Optional. Caption shown in the lightbox. Leave blank
- *                                   if not needed — the client can fill this in per image.
- *
- * ---
- * Behaviour
- * ---
- *
- * - Only <img> elements are supported (not divs, links, or background images).
- * - Clicking an active image opens Fancybox at that image's position in the group.
- * - Prev/next navigation is limited to images sharing the same `data-lightbox-group`.
- * - Gallery order follows DOM order on the page.
- * - Images with `data-lightbox` but no valid group do not open and do not get a pointer cursor.
- * - Uses event delegation on document, so CMS/dynamic content does not need re-init.
- *
- * ---
- * Example
- * ---
- *
- *   <img
- *     src="product-screenshot.avif"
- *     alt="Case Management dashboard"
- *     data-lightbox=""
- *     data-lightbox-group="general"
- *     data-lightbox-caption="Case Management dashboard"
- *   />
+ *   data-lightbox-group="general"   Required. Non-empty group name (gallery).
+ *   data-lightbox-caption=""        Optional. Caption shown in the lightbox.
  */
 (() => {
   // Prevent double-init if the script is embedded more than once (e.g. site + page code).
   if (window.__caseIqLightboxInitialized) return;
   window.__caseIqLightboxInitialized = true;
 
-  // Base selector — further validated by isLightboxImage() which also requires a group.
   const IMAGE_SELECTOR = "img[data-lightbox]";
+
+  // Fancybox assets — loaded on first use only, never at page load.
+  const FANCYBOX_JS  = "https://cdn.jsdelivr.net/npm/@fancyapps/ui@6.1/dist/fancybox/fancybox.umd.js";
+  const FANCYBOX_CSS = "https://cdn.jsdelivr.net/npm/@fancyapps/ui@6.1/dist/fancybox/fancybox.css";
+
+  let fancyboxLoader = null; // memoised promise so the library loads at most once
+
+  /** Inject the stylesheet once. */
+  function loadCss(href) {
+    if (document.querySelector(`link[href="${href}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    document.head.appendChild(link);
+  }
+
+  /** Inject a script and resolve when it has loaded. */
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("Failed to load " + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  /** Load Fancybox (JS + CSS) on first call; reuse the same promise afterwards. */
+  function ensureFancybox() {
+    if (typeof Fancybox !== "undefined") return Promise.resolve();
+    if (!fancyboxLoader) {
+      loadCss(FANCYBOX_CSS);
+      fancyboxLoader = loadScript(FANCYBOX_JS);
+    }
+    return fancyboxLoader;
+  }
 
   /**
    * Returns the group name for an image, or null if the image should be excluded.
@@ -71,9 +81,7 @@
     return group;
   }
 
-  /**
-   * Confirms an element is a fully configured lightbox image (flag + valid group).
-   */
+  /** Confirms an element is a fully configured lightbox image (flag + valid group). */
   function isLightboxImage(img) {
     return img.matches(IMAGE_SELECTOR) && getImageGroup(img) !== null;
   }
@@ -106,31 +114,25 @@
 
   /** Build the group gallery and open Fancybox at the clicked image's index. */
   function openLightbox(clickedImage) {
-    if (typeof Fancybox === "undefined") {
-      console.warn("[Case IQ Lightbox] Fancybox is not loaded.");
-      return;
-    }
-
     const group = getImageGroup(clickedImage);
     if (!group) return;
 
     const groupImages = getGroupImages(group);
     const startIndex = groupImages.indexOf(clickedImage);
-
     if (startIndex === -1 || groupImages.length === 0) return;
 
-    Fancybox.show(buildGalleryItems(groupImages), {
-      startIndex,
-    });
+    Fancybox.show(buildGalleryItems(groupImages), { startIndex });
   }
 
-  /** Delegated click handler — works for images rendered on load or via CMS. */
+  /** Delegated click handler — lazy-loads Fancybox on first use, then opens. */
   function handleImageClick(event) {
     const clickedImage = event.target.closest(IMAGE_SELECTOR);
-    if (!isLightboxImage(clickedImage)) return;
+    if (!clickedImage || !isLightboxImage(clickedImage)) return; // null-guard added
 
     event.preventDefault();
-    openLightbox(clickedImage);
+    ensureFancybox()
+      .then(() => openLightbox(clickedImage))
+      .catch((err) => console.warn("[Case IQ Lightbox]", err));
   }
 
   function initLightbox() {
