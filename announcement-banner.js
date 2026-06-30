@@ -39,7 +39,7 @@
     // whichever comes first. PageSpeed/Lighthouse never scrolls or taps, so during
     // a test this only fires at AUTO_OPEN_DELAY_MS (well past the measured window).
     let fired = false;
-    const events = ["scroll", "pointerdown", "touchstart", "keydown"];
+    const events = ["pointerdown", "touchstart", "keydown"];
 
     const open = () => {
       if (fired) return;
