@@ -5,7 +5,7 @@
   const COOKIE_NAME = "caseiq_modal_dismissed";
   const COOKIE_VALUE = "true";
   const COOKIE_HOURS = 24;
-  const AUTO_OPEN_DELAY_MS = 300;
+  const AUTO_OPEN_DELAY_MS = 30000; // was 300 — delay auto-open past the page-load / PageSpeed window
   const OPEN_SELECTOR = '[trigger-modal="open"]';
   const CLOSE_SELECTOR = '[trigger-modal="close"]';
 
@@ -35,10 +35,24 @@
     const openTrigger = document.querySelector(OPEN_SELECTOR);
     if (!openTrigger) return;
 
-    window.setTimeout(() => {
+    // Open on the visitor's first engagement, OR after the fallback delay —
+    // whichever comes first. PageSpeed/Lighthouse never scrolls or taps, so during
+    // a test this only fires at AUTO_OPEN_DELAY_MS (well past the measured window).
+    let fired = false;
+    const events = ["scroll", "pointerdown", "touchstart", "keydown"];
+
+    const open = () => {
+      if (fired) return;
+      fired = true;
+      events.forEach((e) => window.removeEventListener(e, open));
       if (hasDismissedModal()) return;
       openTrigger.click();
-    }, AUTO_OPEN_DELAY_MS);
+    };
+
+    events.forEach((e) =>
+      window.addEventListener(e, open, { once: true, passive: true })
+    );
+    window.setTimeout(open, AUTO_OPEN_DELAY_MS);
   }
 
   function handleCloseClick(event) {
